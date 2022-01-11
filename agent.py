@@ -11,44 +11,52 @@ LR = 0.001
 
 
 class Agent:
-    def __init__(self) -> None:
-        self.n_games = 0
+    def __init__(self, name) -> None:
         self.epsilon = 0  # randomness
         self.gamma = 0.9  # discount rate
         self.memory = deque(maxlen=MAX_MEMORY)
         self.model = Linear_QNet(11, 255,  3)
         self.trainer = QTrainer(self.model, LR, self.gamma)
 
-    def get_state(self, game):
-        head = game.snake[0]
+        # Data
+        self.n_games = 0
+        self.scores = []
+        self.mean_scores = []
+        self.total_score = 0
+        self.record_score = 0
+        self.name = name
+
+    def get_state(self, game, snake_id):
+        snake = game.snakes[snake_id]
+        head = snake.body[0]
         point_l = Point(head.x - 20, head.y)
         point_r = Point(head.x + 20, head.y)
         point_u = Point(head.x, head.y - 20)
         point_d = Point(head.x, head.y + 20)
 
-        dir_l = game.direction == Direction.LEFT
-        dir_r = game.direction == Direction.RIGHT
-        dir_u = game.direction == Direction.UP
-        dir_d = game.direction == Direction.DOWN
+        dir_l = snake.direction == Direction.LEFT
+        dir_r = snake.direction == Direction.RIGHT
+        dir_u = snake.direction == Direction.UP
+        dir_d = snake.direction == Direction.DOWN
 
         state = [
             # Danger straight
-            (dir_r and game.is_collision(point_r)) or
-            (dir_l and game.is_collision(point_l)) or
-            (dir_u and game.is_collision(point_u)) or
-            (dir_d and game.is_collision(point_d)),
+            (dir_r and game.is_collision(snake_id, point_r)) or
+            (dir_l and game.is_collision(snake_id, point_l)) or
+            (dir_u and game.is_collision(snake_id, point_u)) or
+            (dir_d and game.is_collision(snake_id, point_d)),
 
             # Danger right
-            (dir_u and game.is_collision(point_r)) or
-            (dir_d and game.is_collision(point_l)) or
-            (dir_l and game.is_collision(point_u)) or
-            (dir_r and game.is_collision(point_d)),
+            (dir_u and game.is_collision(snake_id, point_r)) or
+            (dir_d and game.is_collision(snake_id, point_l)) or
+            (dir_l and game.is_collision(snake_id, point_u)) or
+            (dir_r and game.is_collision(snake_id, point_d)),
 
             # Danger left
-            (dir_d and game.is_collision(point_r)) or
-            (dir_u and game.is_collision(point_l)) or
-            (dir_r and game.is_collision(point_u)) or
-            (dir_l and game.is_collision(point_d)),
+            (dir_d and game.is_collision(snake_id, point_r)) or
+            (dir_u and game.is_collision(snake_id, point_l)) or
+            (dir_r and game.is_collision(snake_id, point_u)) or
+            (dir_l and game.is_collision(snake_id, point_d)),
 
             # Move direction
             dir_l,
@@ -57,10 +65,10 @@ class Agent:
             dir_d,
 
             # Food location
-            game.food.x < game.head.x,  # food left
-            game.food.x > game.head.x,  # food right
-            game.food.y < game.head.y,  # food up
-            game.food.y > game.head.y  # food down
+            game.food.x < head.x,  # food left
+            game.food.x > head.x,  # food right
+            game.food.y < head.y,  # food up
+            game.food.y > head.y  # food down
         ]
 
         return np.array(state, dtype=int)
@@ -99,44 +107,51 @@ class Agent:
 
 
 def train():
-    plot_scores = []
-    plot_mean_scores = []
-    total_score = 0
-    record = 0
-    agent = Agent()
-    game = SnakeGameAI()
+    agents = [Agent("Linear_QNet(11, 255,  3) #0"),
+              Agent("Linear_QNet(11, 255,  3) #1")]
+    game = SnakeGameAI(640, 480, 2)
+
+    scores = [[]] * (len(agents) + 1)
+    mean_scores = [[]] * len(scores)
 
     while True:
-        # Get current state
-        state_old = agent.get_state(game)
+        for player_id, agent in enumerate(agents):
+            # Get current state
+            state_old = agent.get_state(game, player_id)
 
-        # Get action
-        action = agent.get_action(state_old)
+            # Get action
+            action = agent.get_action(state_old)
 
-        # Perform move
-        reward, done, score = game.play_step(action)
-        state_new = agent.get_state(game)
+            # Perform move
+            reward, done, score = game.play_step(action, player_id)
+            state_new = agent.get_state(game, player_id)
 
-        # Train short memory
-        agent.train_short_memory(state_old, action, reward, state_new, done)
+            # Train short memory
+            agent.train_short_memory(
+                state_old, action, reward, state_new, done)
 
-        # Remember
-        agent.remember(state_old, action, reward, state_new, done)
+            # Remember
+            agent.remember(state_old, action, reward, state_new, done)
 
-        if done:
-            game.reset()
-            agent.n_games += 1
-            agent.train_long_memory()
+            if done:
+                game.reset()
+                agent.n_games += 1
+                agent.train_long_memory()
 
-            if score > record:
-                record = score
-                agent.model.save()
+                if score > agent.record_score:
+                    agent.record_score = score
+                    agent.model.save(f"model_{agent.name}.pth")
 
-            # TODO: Plot
-            print("Game", agent.n_games, "score", score, "record:", record)
+                print("Agent", agent.name, "Game", agent.n_games,
+                      "score", score, "record:", agent.record_score)
 
-            plot_scores.append(score)
-            total_score += score
-            mean_score = total_score / agent.n_games
-            plot_mean_scores.append(mean_score)
-            plot(plot_scores, plot_mean_scores)
+                agent.scores.append(score)
+                agent.total_score += score
+                mean_score = agent.total_score / agent.n_games
+                agent.mean_scores.append(mean_score)
+
+                # For plot
+                print(len(scores), player_id)
+                scores[player_id] = agent.scores
+                mean_scores[player_id] = agent.mean_scores
+                plot(scores, mean_scores, map(lambda x: x.name, agents))
