@@ -7,17 +7,28 @@ import os
 
 
 class Linear_QNet(nn.Module):
-    def __init__(self, input_size, hidden_size, output_size) -> None:
+    def __init__(self, topology) -> None:
         super().__init__()
 
-        self.linear1 = nn.Linear(input_size, hidden_size)
-        self.linear2 = nn.Linear(hidden_size, output_size)
+        self.topology = topology
+        self.layers = nn.ModuleList()
+
+        # Input, hidden and output layers
+        for i, layer in enumerate(topology[:-1]):
+            next_layer = topology[i + 1]
+            self.layers.append(nn.Linear(layer, next_layer))
+
+    def __str__(self) -> str:
+        return f"Linear_QNet(" + ",".join([str(x) for x in self.topology]) + ")"
 
     def forward(self, x):
-        x = F.relu(self.linear1(x))
-        x = self.linear2(x)
-
-        return x
+        # Input
+        x = F.relu(self.layers[0](x))
+        # Hidden
+        for hidden_layer in self.layers[1:-1]:
+            x = F.relu(hidden_layer(x))
+        # Out
+        return self.layers[-1](x)
 
     def save(self, file_name="model.pth"):
         model_folder_path = "./model"

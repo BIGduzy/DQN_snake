@@ -4,7 +4,7 @@ import random
 from enum import Enum
 from collections import namedtuple
 import numpy as np
-from pygame.constants import K_SPACE
+from pygame.constants import K_SPACE, K_o
 
 pygame.init()
 font = pygame.font.Font('arial.ttf', 25)
@@ -22,14 +22,14 @@ Point = namedtuple('Point', 'x, y')
 # rgb colors
 WHITE = (255, 255, 255)
 RED = (200, 0, 0)
-BLUE1 = (0, 0, 255)
+BLUE1 = (0, 0, 245)
 BLUE2 = (0, 100, 255)
-GREEN1 = (0, 255, 0)
-GREEN2 = (0, 255, 100)
+GREEN1 = (0, 205, 0)
+GREEN2 = (50, 255, 100)
 RED1 = (255, 0, 0)
 RED2 = (255, 100, 0)
-YELLOW1 = (0, 255, 255)
-YELLOW2 = (100, 255, 255)
+YELLOW1 = (205, 205, 0)
+YELLOW2 = (255, 255, 150)
 BLACK = (0, 0, 0)
 GRAY1 = (30, 30, 30)
 GRAY2 = (40, 40, 40)
@@ -52,6 +52,10 @@ class Snake:
         self.color = color
         self.score = 0
 
+        # Used to detect spinning strat
+        self.last_action = None
+        self.repeated_action = False
+
 
 class SnakeGameAI:
     COLORS = ((BLUE1, BLUE2), (GREEN1, GREEN2),
@@ -61,6 +65,7 @@ class SnakeGameAI:
         self.w = w
         self.h = h
         self.n_players = n_players
+        self.num_objects = 0
         self.snakes = []
         self.objects = []
         self.food = None
@@ -95,8 +100,8 @@ class SnakeGameAI:
         # Create random objects
         self.objects = []
 
-        # for _ in range(100):
-        #     self.objects.append(self.get_random_free_point())
+        for _ in range(self.num_objects):
+            self.objects.append(self.get_random_free_point())
 
         # self.score = 0
         self.food = None
@@ -125,9 +130,12 @@ class SnakeGameAI:
                 if event.key == K_SPACE:
                     SPEED = FAST_SPEED if SPEED == WATCH_SPEED else WATCH_SPEED
                     print("Changed speed to:", SPEED)
+                if event.key == K_o:
+                    self.num_objects += 25
+                    self.num_objects %= 100
+                    print("Changed num objects to: ", self.num_objects)
 
         snake = self.snakes[snake_id]
-
         # 2. move
         self._move(snake_id, action)  # update the head
         snake.body.insert(0, snake.head)
@@ -157,6 +165,10 @@ class SnakeGameAI:
             self._place_food()
         else:
             snake.body.pop()
+
+        # Prevent spinning strat
+        if snake.repeated_action:  # Set in _move
+            reward -= 1
 
         # 5. update ui and clock
         self._update_ui()
@@ -202,7 +214,7 @@ class SnakeGameAI:
         for i, snake in enumerate(self.snakes):
             text = font.render(
                 "Score: " + str(snake.score), True, WHITE)
-            self.display.blit(text, [i * 200, 0])
+            self.display.blit(text, [i * 150, 0])
         pygame.display.flip()
 
     def _move(self, snake_id, action):
@@ -238,3 +250,7 @@ class SnakeGameAI:
             y -= BLOCK_SIZE
 
         snake.head = Point(x, y)
+
+        snake.repeated_action = action != [
+            1, 0, 0] and snake.last_action == action
+        snake.last_action = action
