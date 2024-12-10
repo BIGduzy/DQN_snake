@@ -1,10 +1,11 @@
 from numpy.random.mtrand import gamma
 import pygame
 import random
+import math
 from enum import Enum
 from collections import namedtuple
 import numpy as np
-from pygame.constants import K_SPACE, K_o
+from pygame.constants import K_SPACE, K_o, K_r, K_d
 
 pygame.init()
 font = pygame.font.Font('arial.ttf', 25)
@@ -51,6 +52,7 @@ class Snake:
                      Point(self.head.x-(2*BLOCK_SIZE), self.head.y)]
         self.color = color
         self.score = 0
+        self.dead = False
 
         # Used to detect spinning strat
         self.last_action = None
@@ -68,12 +70,17 @@ class SnakeGameAI:
         self.num_objects = 0
         self.snakes = []
         self.objects = []
+        self.scores = []
         self.food = None
         # init display
         self.display = pygame.display.set_mode((self.w, self.h))
         pygame.display.set_caption('Snake')
         self.clock = pygame.time.Clock()
         self.reset()
+        self.reset_scores()
+
+        # Debug
+        self.debugging = True
 
     def get_random_free_point(self):
         # TODO: This could freeze te game if no free spots
@@ -108,6 +115,9 @@ class SnakeGameAI:
         self._place_food()
         self.frame_iteration = 0
 
+    def reset_scores(self):
+        self.scores = [0 for _ in self.snakes]
+
     def _place_food(self):
         x = random.randint(0, (self.w-BLOCK_SIZE)//BLOCK_SIZE)*BLOCK_SIZE
         y = random.randint(0, (self.h-BLOCK_SIZE)//BLOCK_SIZE)*BLOCK_SIZE
@@ -130,32 +140,45 @@ class SnakeGameAI:
                 if event.key == K_SPACE:
                     SPEED = FAST_SPEED if SPEED == WATCH_SPEED else WATCH_SPEED
                     print("Changed speed to:", SPEED)
-                if event.key == K_o:
+                elif event.key == K_o:
                     self.num_objects += 25
-                    self.num_objects %= 100
+                    self.num_objects %= 200
                     print("Changed num objects to: ", self.num_objects)
+                elif event.key == K_r:
+                    self.reset_scores()
+                elif event.key == K_d:
+                    self.debugging = not self.debugging
 
         snake = self.snakes[snake_id]
         # 2. move
+        old_distance = self._calc_distance(snake.head, self.food)
         self._move(snake_id, action)  # update the head
         snake.body.insert(0, snake.head)
+        new_ditance = self._calc_distance(snake.head, self.food)
 
         # 3. check if game over
         reward = 0
         game_over = False
         if self.is_collision(snake_id) or self.frame_iteration > 100 * len(snake.body):
+            snake.dead = True
             game_over = True
             reward = -10
+
+            # Check if we have a winner
+            live_snakes = [not x.dead for x in self.snakes]
+            if live_snakes.count(True) == 1:
+                self.scores[live_snakes.index(True)] += 1
+
             return reward, game_over, snake.score
 
         for i, other_snake in enumerate(self.snakes):
             # Other snake killed by current snake
             if i != snake_id and other_snake.head in snake.body[1:]:
-                reward = 20
+                # reward = 5
                 break
             # Other snake got the food
             elif other_snake.head == self.food:
-                reward = -5
+                # reward = -5
                 break
 
         # 4. place new food or just move
@@ -168,13 +191,22 @@ class SnakeGameAI:
 
         # Prevent spinning strat
         if snake.repeated_action:  # Set in _move
+            reward -= 2
+            pass
+
+        # Reward for getting closer to the food
+        if new_ditance < old_distance:
+            reward += 1
+        elif new_ditance > old_distance:
             reward -= 1
 
-        # 5. update ui and clock
+        # Return game over and score
+        return reward, game_over, snake.score
+
+    def render(self):
+        # update ui and clock
         self._update_ui()
         self.clock.tick(SPEED)
-        # 6. return game over and score
-        return reward, game_over, snake.score
 
     def is_collision(self, snake_id, pt=None):
         if pt is None:
@@ -182,8 +214,8 @@ class SnakeGameAI:
         # hits boundary
         if pt.x > self.w - BLOCK_SIZE or pt.x < 0 or pt.y > self.h - BLOCK_SIZE or pt.y < 0:
             return True
-        # hits itself
-        if any(pt in snake.body[1:] for snake in self.snakes):
+        # hits itself or other snakes (exclude own head)
+        if any(pt in snake.body[bool(snake == self.snakes[snake_id]):] for snake in self.snakes):
             return True
 
         # hit objects
@@ -191,6 +223,9 @@ class SnakeGameAI:
             return True
 
         return False
+
+    def _calc_distance(self, point1, point2):
+        return math.sqrt((point1.x - point2.x) ** 2 + (point1.y - point2.y) ** 2)
 
     def _update_ui(self):
         self.display.fill(BLACK)
@@ -208,6 +243,9 @@ class SnakeGameAI:
             pygame.draw.rect(self.display, GRAY2,
                              pygame.Rect(pt.x+4, pt.y+4, 12, 12))
 
+        self._write_text(
+            *[(f"{x}", self.COLORS[i][0]) for i, x in enumerate(self.scores)])
+
         pygame.draw.rect(self.display, RED, pygame.Rect(
             self.food.x, self.food.y, BLOCK_SIZE, BLOCK_SIZE))
 
@@ -216,6 +254,41 @@ class SnakeGameAI:
                 "Score: " + str(snake.score), True, WHITE)
             self.display.blit(text, [i * 150, 0])
         pygame.display.flip()
+
+    def _write_text(self, *args):
+        for i, (string, color) in enumerate(args):
+            text = font.render(str(string), True, color)
+            self.display.blit(text, [i * 150, self.h - 50])
+        pygame.display.flip()
+        # import time
+        # time.sleep(0.4)
+
+    def _draw_rec(self, point, color):
+        pygame.draw.rect(self.display, color, pygame.Rect(
+            point.x, point.y, BLOCK_SIZE, BLOCK_SIZE
+        ))
+        pygame.display.flip()
+
+    def _draw_line(self, length, direction, color):
+        start_point = Point(
+            self.snakes[0].head.x + BLOCK_SIZE / 2, self.snakes[0].head.y + BLOCK_SIZE / 2)
+        if direction == Direction.UP:
+            length = length * BLOCK_SIZE
+            end_point = Point(start_point.x, start_point.y - length)
+        elif direction == Direction.RIGHT:
+            length = length * BLOCK_SIZE
+            end_point = Point(start_point.x + length, start_point.y)
+        elif direction == Direction.DOWN:
+            length = length * BLOCK_SIZE
+            end_point = Point(start_point.x,  start_point.y + length)
+        elif direction == Direction.LEFT:
+            length = length * BLOCK_SIZE
+            end_point = Point(start_point.x - length, start_point.y)
+
+        pygame.draw.line(self.display, color, start_point, end_point)
+        pygame.display.flip()
+        import time
+        time.sleep(0.4)
 
     def _move(self, snake_id, action):
         # action = [straight, right, left] bools
